@@ -1,5 +1,5 @@
 // Peace.java
-// Document Version 1.0.0
+// Document Version 1.0.1
 // Creation date: 2026/07/25
 // Creator: Thalassicus
 
@@ -50,6 +50,7 @@ class Peace {
 
          // START EDIT
          credits = ThalDiplomacy.randomizedPeaceDelta(credits);
+         ThalDiplomacy.selectPeaceRegions(d, d.valueCredits() + credits);
          // END EDIT
          DealDrawfter.draft(d, credits, true, true);
          new UIDipMessDeal(Dic.¤¤peace, desc, d, 0.5, -0.5).send();

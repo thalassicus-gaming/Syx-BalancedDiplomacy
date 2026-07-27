@@ -93,11 +93,6 @@
                 </plugins>
             </build>
             <dependencies>
-                <dependency>
-                    <groupId>com.github.argon.sos</groupId>
-                    <artifactId>sos-mod-sdk</artifactId>
-                    <version>sdk-${mod.sdk.version}</version>
-                </dependency>
             </dependencies>
         </profile>
         <profile>
@@ -161,8 +156,8 @@
 
         <!-- These settings will go into the mods _Info.txt file -->
         <mod.version>${project.version}</mod.version>
-        <mod.name>Balanced Demands</mod.name>
-        <mod.description>Balanced Demands</mod.description>
+        <mod.name>Balanced Diplomacy</mod.name>
+        <mod.description>NPC demands make more sense. If you like this mod, you can find my others on the mod's Steam Workshop page.</mod.description>
         <mod.author>Thalassicus</mod.author>
         <mod.info></mod.info>
         <!--
