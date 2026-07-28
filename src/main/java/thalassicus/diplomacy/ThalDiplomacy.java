@@ -1,9 +1,9 @@
 // ThalDiplomacy.java
-// Document Version 1.0.6
+// Document Version 1.0.8
 // Creation date: 2026/07/25
 // Creator: Thalassicus
 
-package thal.diplomacy;
+package thalassicus.diplomacy;
 
 import game.boosting.BOOSTABLES;
 import game.faction.FACTIONS;
@@ -16,12 +16,18 @@ import game.faction.diplomacy.deal.DealRegs;
 import game.faction.npc.FactionNPC;
 import game.faction.royalty.Royalty;
 import game.time.TIME;
+import init.paths.PATHS;
 import snake2d.util.misc.CLAMP;
 import snake2d.util.rnd.RND;
+import thalassicus.util.ThalsLogger;
 import world.army.AD;
 import world.region.RD;
 
 public final class ThalDiplomacy {
+    public static final ThalsLogger log = new ThalsLogger(
+            ThalsLogger.INFO,
+            PATHS.local().LOGS.get().resolve("ThalDiplomacy.log").toString()
+    );
 
     private static final double CLAMP_MIN_ARMY_POWER = 1000.0;
     private static final double PEACE_OFFERABLE_WORTH_MULT = 0.10;
@@ -42,6 +48,10 @@ public final class ThalDiplomacy {
     private static final double AGREEMENT_OPINION_MARGIN_ADD = 0.25;
     private static final double RIVALRY_ECONOMIC_PARITY_EXPONENT = 0.4;
     private static final double RIVALRY_MILITARY_PARITY_EXPONENT = 0.6;
+    private static final double RIVALRY_PLAYER_POWER_MULT = 1.2;
+    private static final long LOG_THROTTLE_MILLISECONDS = 60000L;
+
+    private static long lastPeaceTermsLogTime = 0L;
 
     private ThalDiplomacy() {
     }
@@ -62,9 +72,12 @@ public final class ThalDiplomacy {
     // either one veto: a realm that cannot field an army stops posturing however rich it
     // is. Kept on net worth and field army rather than offensivePower(), which counts
     // player credits as latent troops and has no equivalent term for a faction.
+    // The player's army is weighted up before comparison, so peak hostility falls on a
+    // faction somewhat stronger than the player rather than an exact match. An evenly
+    // matched fight favours a human, whose tactical play the battle AI does not match.
     public static double rivalryParity(FactionNPC npcFaction) {
         double economic = strengthParity(FACTIONS.WORTH().faction(), FACTIONS.WORTH().faction(npcFaction));
-        double military = strengthParity(AD.power().get(FACTIONS.player()), AD.power().get(npcFaction));
+        double military = strengthParity(AD.power().get(FACTIONS.player()) * RIVALRY_PLAYER_POWER_MULT, AD.power().get(npcFaction));
         return Math.pow(economic, RIVALRY_ECONOMIC_PARITY_EXPONENT) * Math.pow(military, RIVALRY_MILITARY_PARITY_EXPONENT);
     }
 
@@ -94,7 +107,7 @@ public final class ThalDiplomacy {
             return 0.0;
         }
 
-        double warYears = DIP.secondSinceStance(npcFaction) / TIME.years().cycleSeconds();;
+        double warYears = DIP.secondSinceStance(npcFaction) / TIME.years().cycleSeconds();
         return CLAMP.d(warYears / rampYears(npcFaction), 0.0, 1.0);
     }
 
@@ -115,11 +128,43 @@ public final class ThalDiplomacy {
     // Negative results bill the player, positive results bill the faction.
     // DealParty.init() pre-quarters a non-player party's offerableWorth, so the same
     // fraction takes a smaller share from the faction than it does from the player.
+    // Deal.valueCredits() runs every frame while the diplomacy screen is open, so this
+    // breakdown is throttled against the wall clock rather than game time, which stops
+    // while that screen is paused. It is the only coverage of a player-drafted peace,
+    // since that path reaches the deal system without passing through a shadowed event.
     public static double calculatePeaceValue(DealParty playerParty, DealParty npcParty) {
         FactionNPC npcFaction = npcParty.npc();
         double advantage = peaceAdvantage(playerParty.f(), npcFaction);
         DealParty payingParty = advantage < 0.0 ? playerParty : npcParty;
-        return advantage * PEACE_OFFERABLE_WORTH_MULT * payingParty.offerableWorth();
+        double peaceValue = advantage * PEACE_OFFERABLE_WORTH_MULT * payingParty.offerableWorth();
+        if (System.currentTimeMillis() - lastPeaceTermsLogTime >= LOG_THROTTLE_MILLISECONDS) {
+            logPeaceTerms(playerParty.f(), npcFaction, payingParty, peaceValue);
+        }
+
+        return peaceValue;
+    }
+
+    // Stamping the throttle here as well keeps an event-driven offer from repeating the
+    // same breakdown on the frames that follow it.
+    public static void logPeaceTerms(Faction playerFaction, FactionNPC npcFaction, DealParty payingParty, double peaceValue) {
+        lastPeaceTermsLogTime = System.currentTimeMillis();
+        log.info("PEACE TERMS with %s", npcFaction.name);
+        log.info("  power: player %.0f, faction %.0f -> military advantage %+.3f",
+                playerFaction.offensivePower(), npcFaction.offensivePower(),
+                militaryAdvantage(playerFaction, npcFaction));
+        log.info("  war: %.1f days elapsed, population %d -> ramp %.2f years, progress %.3f",
+                DIP.secondSinceStance(npcFaction) * TIME.secondsPerDayI(),
+                realmPopulation(npcFaction), rampYears(npcFaction), warProgress(npcFaction));
+        log.info("  negotiation shift %+.3f -> peace advantage %+.3f",
+                negotiationShift(npcFaction), peaceAdvantage(playerFaction, npcFaction));
+        log.info("  %s pays: offerable worth %.0f x %.2f -> peace value %.0f",
+                payingParty.f().name, payingParty.offerableWorth(), PEACE_OFFERABLE_WORTH_MULT, peaceValue);
+    }
+
+    public static void logPeaceOffer(Deal deal, FactionNPC npcFaction, double peaceValue, double draftTarget) {
+        DealParty payingParty = peaceValue < 0.0 ? deal.player : deal.npc;
+        logPeaceTerms(deal.player.f(), npcFaction, payingParty, peaceValue);
+        log.info("  after random discount -> draft target %.0f", draftTarget);
     }
 
     // DealDrawfter.give() settles a deal entirely in credits whenever the paying side
@@ -143,6 +188,8 @@ public final class ThalDiplomacy {
                     region.set(true);
                     remainingBudget -= regionValue;
                     selectedAny = true;
+                    log.info("  land: %s worth %.0f, budget remaining %.0f",
+                            region.reg().info.name(), regionValue, remainingBudget);
                 }
             }
         }
@@ -171,6 +218,26 @@ public final class ThalDiplomacy {
         return playerParty.offerableWorth() * EXTORTION_OFFERABLE_WORTH_MULT * leverage * variation;
     }
 
+    // Rivalry is what allowed this demand to fire at all, and a threat is the only
+    // sporadic moment it can be recorded, since RTrust recomputes it on every read.
+    public static void logExtortionDemand(DealParty playerParty, FactionNPC npcFaction, double demandWorth) {
+        Faction playerFaction = playerParty.f();
+        double economic = strengthParity(FACTIONS.WORTH().faction(), FACTIONS.WORTH().faction(npcFaction));
+        double military = strengthParity(AD.power().get(FACTIONS.player()) * RIVALRY_PLAYER_POWER_MULT, AD.power().get(npcFaction));
+        log.info("EXTORTION DEMAND from %s", npcFaction.name);
+        log.info("  worth: player %.0f, faction %.0f -> economic parity %.3f",
+                FACTIONS.WORTH().faction(), FACTIONS.WORTH().faction(npcFaction), economic);
+        log.info("  army: player %d x %.2f, faction %d -> military parity %.3f",
+                AD.power().get(FACTIONS.player()), RIVALRY_PLAYER_POWER_MULT,
+                AD.power().get(npcFaction), military);
+        log.info("  rivalry %.3f -> trust multiplier %.3f",
+                rivalryParity(npcFaction), 1.0 - rivalryParity(npcFaction));
+        log.info("  military advantage %+.3f -> leverage %.3f",
+                militaryAdvantage(playerFaction, npcFaction), extortionLeverage(playerFaction, npcFaction));
+        log.info("  player offerable worth %.0f x %.2f -> demand %.0f",
+                playerParty.offerableWorth(), EXTORTION_OFFERABLE_WORTH_MULT, demandWorth);
+    }
+
     // Vanilla spread this across 0.25 to 1.0, a fourfold swing driven by a trait the
     // player cannot see or influence. It cancels out of the opinion a gift grants, but
     // still governs how long that gift is remembered and how much OpsGifts overstates
@@ -185,6 +252,18 @@ public final class ThalDiplomacy {
     // margin to survive ordinary decay.
     public static double agreementTargetOpinion(DipStance stance) {
         return stance.opinionNeeded * CANCELLATION_OPINION_MULTIPLIER + AGREEMENT_OPINION_MARGIN_ADD;
+    }
+
+    // The requested against drafted pair is the pair to have when a player reports an
+    // offer they could not accept.
+    public static void logAgreementWarning(FactionNPC npcFaction, DipStance stance, double generosityNeeded,
+            double requestedWorth, double draftedWorth, double achievableOpinion) {
+        log.info("AGREEMENT WARNING from %s", npcFaction.name);
+        log.info("  stance %s needs %.2f opinion, cancels below %.2f, demand targets %.2f",
+                stance.name, stance.opinionNeeded, stance.opinionNeeded * CANCELLATION_OPINION_MULTIPLIER,
+                agreementTargetOpinion(stance));
+        log.info("  generosity needed %.3f -> requested worth %.0f", generosityNeeded, requestedWorth);
+        log.info("  drafted worth %.0f -> achievable opinion %.3f", draftedWorth, achievableOpinion);
     }
 
     public static double proportionalOpinion(double fullOpinion, double requestedWorth, double draftedWorth) {

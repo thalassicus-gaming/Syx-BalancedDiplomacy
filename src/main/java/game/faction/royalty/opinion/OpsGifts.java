@@ -9,7 +9,7 @@ import game.faction.npc.FactionNPC;
 import game.faction.royalty.Royalty;
 import game.time.TIME;
 import init.sprite.UI.UI;
-import thal.diplomacy.ThalDiplomacy;
+import thalassicus.diplomacy.ThalDiplomacy;
 import util.text.D;
 
 public final class OpsGifts {

@@ -1,5 +1,5 @@
 // Peace.java
-// Document Version 1.0.1
+// Document Version 1.0.2
 // Creation date: 2026/07/25
 // Creator: Thalassicus
 
@@ -12,7 +12,7 @@ import game.faction.npc.FactionNPC;
 import init.race.KingMessages;
 import settlement.main.SETT;
 import snake2d.util.rnd.RND;
-import thal.diplomacy.ThalDiplomacy;
+import thalassicus.diplomacy.ThalDiplomacy;
 import util.text.Dic;
 import view.ui.diplomacy.UIDipMessDeal;
 import world.army.AD;
@@ -49,8 +49,11 @@ class Peace {
          }
 
          // START EDIT
+         double peaceValue = credits;
          credits = ThalDiplomacy.randomizedPeaceDelta(credits);
-         ThalDiplomacy.selectPeaceRegions(d, d.valueCredits() + credits);
+         double draftTarget = d.valueCredits() + credits;
+         ThalDiplomacy.logPeaceOffer(d, f, peaceValue, draftTarget);
+         ThalDiplomacy.selectPeaceRegions(d, draftTarget);
          // END EDIT
          DealDrawfter.draft(d, credits, true, true);
          new UIDipMessDeal(Dic.¤¤peace, desc, d, 0.5, -0.5).send();

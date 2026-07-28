@@ -1,5 +1,5 @@
 // WarMessages.java
-// Document Version 1.0.0
+// Document Version 1.0.1
 // Creation date: 2026/07/25
 // Creator: Thalassicus
 
@@ -13,7 +13,7 @@ import game.faction.npc.FactionNPC;
 import game.faction.royalty.opinion.ROPINION;
 import init.race.KingMessages;
 import snake2d.util.sprite.text.Str;
-import thal.diplomacy.ThalDiplomacy;
+import thalassicus.diplomacy.ThalDiplomacy;
 import util.text.D;
 import view.ui.diplomacy.UIDipMess;
 import view.ui.diplomacy.UIDipMessAction;
@@ -107,6 +107,7 @@ class WarMessages {
          // Accepting is the only exit from the trust cycle that produces these
          // demands, so the price has to stay within reach for that exit to exist.
          double demandWorth = ThalDiplomacy.calculateExtortionWorth(d.player, f);
+         ThalDiplomacy.logExtortionDemand(d.player, f, demandWorth);
          DealDrawfter.draft(d, -demandWorth, true, false);
          // END EDIT
          if (d.hasDeal()) {

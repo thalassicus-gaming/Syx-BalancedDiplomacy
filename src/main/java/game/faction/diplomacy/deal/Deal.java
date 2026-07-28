@@ -14,7 +14,7 @@ import game.faction.npc.FactionNPC;
 import game.faction.royalty.opinion.ROPINION;
 import init.trade.TR;
 import init.trade.TRADABLE;
-import thal.diplomacy.ThalDiplomacy;
+import thalassicus.diplomacy.ThalDiplomacy;
 import util.Debugger;
 import util.gui.misc.GBox;
 import view.main.VIEW;

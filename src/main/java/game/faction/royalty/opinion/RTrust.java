@@ -19,7 +19,7 @@ import game.faction.royalty.Royalty;
 import init.sprite.UI.UI;
 import snake2d.util.gui.GUI_BOX;
 import snake2d.util.sprite.SPRITE;
-import thal.diplomacy.ThalDiplomacy;
+import thalassicus.diplomacy.ThalDiplomacy;
 import util.data.GETTER;
 import util.gui.misc.GBox;
 import util.info.GFORMAT;

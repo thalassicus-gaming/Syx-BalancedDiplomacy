@@ -1,5 +1,5 @@
 // Stance.java
-// Document Version 1.0.1
+// Document Version 1.0.2
 // Creation date: 2026/07/25
 // Creator: Thalassicus
 
@@ -21,7 +21,7 @@ import settlement.main.SETT;
 import settlement.stats.Induvidual;
 import snake2d.util.rnd.RND;
 import snake2d.util.sprite.text.Str;
-import thal.diplomacy.ThalDiplomacy;
+import thalassicus.diplomacy.ThalDiplomacy;
 import util.text.D;
 import view.ui.diplomacy.UIDipMess;
 import view.ui.diplomacy.UIDipMessDeal;
@@ -143,7 +143,9 @@ final class Stance {
          // Writing the shortfall straight into the credits field bypasses the clamp
          // against credits.max(), which then fails DealSave validation and greys out
          // the accept button. Ask only for what the drafter could actually assemble.
-         double achievableOpinion = ThalDiplomacy.proportionalOpinion(more, am, d.valueCredits());
+         double draftedWorth = d.valueCredits();
+         double achievableOpinion = ThalDiplomacy.proportionalOpinion(more, am, draftedWorth);
+         ThalDiplomacy.logAgreementWarning(fa, current, more, am, draftedWorth, achievableOpinion);
          data.stanceMess = true;
          new UIDipMessDeal(¤¤Warning, m.STANCE_WARNING.get(fa), d, achievableOpinion, 0.0).send();
          // END EDIT

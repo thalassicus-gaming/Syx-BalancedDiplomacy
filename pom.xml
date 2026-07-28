@@ -157,7 +157,7 @@
         <!-- These settings will go into the mods _Info.txt file -->
         <mod.version>${project.version}</mod.version>
         <mod.name>Balanced Diplomacy</mod.name>
-        <mod.description>NPC demands make more sense. If you like this mod, you can find my others on the mod's Steam Workshop page.</mod.description>
+        <mod.description>Makes the diplomacy system more fun and challenging. Threats now come from factions who can back up their words with military force. Additionally, demands are affordable enough that you can actually make a choice. If you like this mod, check out my others on the mod's Steam Workshop page.</mod.description>
         <mod.author>Thalassicus</mod.author>
         <mod.info></mod.info>
         <!--
