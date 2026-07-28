@@ -12,6 +12,7 @@ import game.faction.royalty.opinion.ROPINION;
 import game.faction.royalty.opinion.ROpper;
 import game.time.TIME;
 import init.sprite.UI.UI;
+import snake2d.LOG;
 import snake2d.util.misc.CLAMP;
 import util.gui.misc.GBox;
 import util.info.GFORMAT;
