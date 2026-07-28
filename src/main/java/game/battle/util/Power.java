@@ -179,7 +179,6 @@ public final class Power {
        // Key effects:
        // - 50% stronger opponents will become rivals.
        // - Garrisons must be 50% stronger before doing a sortie to attack the player.
-       // - AIs will only engage the player's army if it's 50% stronger.
       if (div.faction() == FACTIONS.player()) {tot *= 1.5;}
       // MOD END
       return tot;
