@@ -1,10 +1,11 @@
 // ThalDiplomacy.java
-// Document Version 1.0.8
+// Document Version 1.0.11
 // Creation date: 2026/07/25
 // Creator: Thalassicus
 
 package thalassicus.diplomacy;
 
+import game.GameDisposable;
 import game.boosting.BOOSTABLES;
 import game.faction.FACTIONS;
 import game.faction.Faction;
@@ -17,6 +18,7 @@ import game.faction.npc.FactionNPC;
 import game.faction.royalty.Royalty;
 import game.time.TIME;
 import init.paths.PATHS;
+import java.util.Arrays;
 import snake2d.util.misc.CLAMP;
 import snake2d.util.rnd.RND;
 import thalassicus.util.ThalsLogger;
@@ -47,11 +49,39 @@ public final class ThalDiplomacy {
     private static final double CANCELLATION_OPINION_MULTIPLIER = 0.75;
     private static final double AGREEMENT_OPINION_MARGIN_ADD = 0.25;
     private static final double RIVALRY_ECONOMIC_PARITY_EXPONENT = 0.4;
-    private static final double RIVALRY_MILITARY_PARITY_EXPONENT = 0.6;
+    private static final double RIVALRY_MILITARY_PARITY_EXPONENT = 0.8;
     private static final double RIVALRY_PLAYER_POWER_MULT = 1.2;
+    private static final double RIVALRY_TOP_RANK_FINAL_MULT = 0.8;
+    private static final double RIVALRY_RANK_DECAY_BASE = 0.75;
+    private static final double RIVALRY_RERANK_DELTA = 0.05;
+    private static final double RIVALRY_VASSAL_MULT = 0.9;
+    private static final double RIVALRY_COLLEAGUE_MULT = 0.9;
+    private static final double RIVALRY_ALLY_MULT = 0.5;
+    private static final double RIVALRY_OVERLORD_MULT = 0.01;
+    private static final double RIVALRY_DISTANCE_DECAY = 300.0;
+    private static final double RIVALRY_MIN_DISTANCE = 0.5;
+    private static final int MAX_TRACKED_RIVALS = 10;
+    private static final int UNRANKED = -1;
     private static final long LOG_THROTTLE_MILLISECONDS = 60000L;
 
     private static long lastPeaceTermsLogTime = 0L;
+    private static int lastRivalryCacheDay = UNRANKED;
+    private static int[] rivalryRanks = null;
+    private static double[] rankedRawRivalry = null;
+    private static double[] currentRawRivalry = null;
+    private static FactionNPC[] rankingCandidates = null;
+    private static int rankingCandidateCount = 0;
+
+    // The ranking is static, so a session that ends would otherwise leave it populated
+    // for whichever save loads next.
+    static {
+        new GameDisposable() {
+            @Override
+            protected void dispose() {
+                lastRivalryCacheDay = UNRANKED;
+            }
+        };
+    }
 
     private ThalDiplomacy() {
     }
@@ -75,10 +105,169 @@ public final class ThalDiplomacy {
     // The player's army is weighted up before comparison, so peak hostility falls on a
     // faction somewhat stronger than the player rather than an exact match. An evenly
     // matched fight favours a human, whose tactical play the battle AI does not match.
-    public static double rivalryParity(FactionNPC npcFaction) {
+    public static double currentRawRivalryScore(FactionNPC npcFaction) {
         double economic = strengthParity(FACTIONS.WORTH().faction(), FACTIONS.WORTH().faction(npcFaction));
         double military = strengthParity(AD.power().get(FACTIONS.player()) * RIVALRY_PLAYER_POWER_MULT, AD.power().get(npcFaction));
-        return Math.pow(economic, RIVALRY_ECONOMIC_PARITY_EXPONENT) * Math.pow(military, RIVALRY_MILITARY_PARITY_EXPONENT);
+        double rawScore = Math.pow(economic, RIVALRY_ECONOMIC_PARITY_EXPONENT) * Math.pow(military, RIVALRY_MILITARY_PARITY_EXPONENT);
+        double distance = RD.DIST().capitolDist(npcFaction);
+        double distanceMultiplier = RIVALRY_MIN_DISTANCE + (1.0 - RIVALRY_MIN_DISTANCE) * Math.exp(-distance / RIVALRY_DISTANCE_DECAY);
+        return rawScore * distanceMultiplier * stanceRivalryModifier(npcFaction);
+    }
+
+    // A treaty makes a faction a less likely choice of rival rather than an impossible
+    // one, so a vassal approaching parity with its overlord can still turn on them.
+    private static double stanceRivalryModifier(FactionNPC npcFaction) {
+        if (DIP.OVERLORD().is(npcFaction)) {
+            return RIVALRY_OVERLORD_MULT;
+        }
+
+        if (DIP.VASSAL().is(npcFaction)) {
+            return RIVALRY_VASSAL_MULT;
+        }
+
+        if (DIP.ALLY().is(npcFaction)) {
+            return RIVALRY_ALLY_MULT;
+        }
+
+        if (DIP.PACT().is(npcFaction)) {
+            return RIVALRY_COLLEAGUE_MULT;
+        }
+
+        return 1.0;
+    }
+
+    // Scoring by rank rather than by raw parity fixes how many rivals exist at once. A
+    // world whose factions cluster at one strength would otherwise turn every neighbour
+    // hostile at the same moment and leave none hostile on either side of that moment.
+    public static double rivalryParity(FactionNPC npcFaction) {
+        refreshRivalryRankingIfStale();
+        int rank = rivalryRanks[npcFaction.index()];
+        if (rank == UNRANKED) {
+            return 0.0;
+        }
+
+        return RIVALRY_TOP_RANK_FINAL_MULT * Math.pow(RIVALRY_RANK_DECAY_BASE, rank);
+    }
+
+    public static int rivalryRank(FactionNPC npcFaction) {
+        refreshRivalryRankingIfStale();
+        return rivalryRanks[npcFaction.index()];
+    }
+
+    private static void refreshRivalryRankingIfStale() {
+        int currentDay = (int)TIME.days().bitsSinceStart();
+        if (currentDay == lastRivalryCacheDay) {
+            return;
+        }
+
+        lastRivalryCacheDay = currentDay;
+        refreshRivalryRanking(currentDay);
+    }
+
+    // Re-ranking only once a raw score has drifted past a threshold stops two factions
+    // sitting a hair apart from trading places daily, which would flip one of them
+    // between full and half hostility. Realm strength moves over months, not days.
+    private static void refreshRivalryRanking(int currentDay) {
+        if (rivalryRanks == null) {
+            rivalryRanks = new int[FACTIONS.MAX()];
+            rankedRawRivalry = new double[FACTIONS.MAX()];
+            currentRawRivalry = new double[FACTIONS.MAX()];
+            rankingCandidates = new FactionNPC[FACTIONS.MAX()];
+            Arrays.fill(rivalryRanks, UNRANKED);
+            log.info("RIVALRY allocated ranking arrays for %d faction slots", FACTIONS.MAX());
+        }
+
+        snapshotRankingCandidates();
+        Arrays.fill(currentRawRivalry, 0.0);
+        boolean hasDrifted = false;
+        boolean holdsAnyRank = false;
+        int canAttackPlayerCount = 0;
+
+        log.info("RIVALRY REFRESH day %d, %d active factions", currentDay, rankingCandidateCount);
+
+        for (int candidateI = 0; candidateI < rankingCandidateCount; candidateI++) {
+            FactionNPC candidate = rankingCandidates[candidateI];
+            int index = candidate.index();
+            boolean canAttackPlayer = RD.DIST().factionCanAttackPlayerAllies(candidate);
+            if (canAttackPlayer) {
+                canAttackPlayerCount++;
+                currentRawRivalry[index] = currentRawRivalryScore(candidate);
+            }
+
+            if (rivalryRanks[index] != UNRANKED) {
+                holdsAnyRank = true;
+            }
+
+            double drift = Math.abs(currentRawRivalry[index] - rankedRawRivalry[index]);
+            if (drift > RIVALRY_RERANK_DELTA) {
+                hasDrifted = true;
+            }
+
+            log.trace("  %-15s: canAttackPlayer %b, stance x%.2f, raw %.4f, previous %.4f, drift %.4f, distance %d",
+                    candidate.name, canAttackPlayer, stanceRivalryModifier(candidate),
+                    currentRawRivalry[index], rankedRawRivalry[index], drift, RD.DIST().capitolDist(candidate));
+        }
+
+        // With nothing ranked yet the drift test has no baseline to react to, so a world
+        // whose scores all sit under the threshold would never rank anyone at all.
+        boolean needsRanking = hasDrifted || !holdsAnyRank;
+        log.info("  %d of %d canAttackPlayer, drifted %b, holds a rank %b -> ranking %b",
+                canAttackPlayerCount, rankingCandidateCount, hasDrifted, holdsAnyRank, needsRanking);
+
+        if (!needsRanking) {
+            return;
+        }
+
+        Arrays.fill(rivalryRanks, UNRANKED);
+
+        for (int rank = 0; rank < MAX_TRACKED_RIVALS; rank++) {
+            int bestIndex = UNRANKED;
+            double bestScore = 0.0;
+
+            for (int candidateI = 0; candidateI < rankingCandidateCount; candidateI++) {
+                int index = rankingCandidates[candidateI].index();
+                if (rivalryRanks[index] == UNRANKED && currentRawRivalry[index] > bestScore) {
+                    bestScore = currentRawRivalry[index];
+                    bestIndex = index;
+                }
+            }
+
+            if (bestIndex == UNRANKED) {
+                log.info("  no candidate left scoring above zero, stopping at rank %d", rank);
+                break;
+            }
+
+            rivalryRanks[bestIndex] = rank;
+        }
+
+        System.arraycopy(currentRawRivalry, 0, rankedRawRivalry, 0, currentRawRivalry.length);
+        logRivalryRanking(currentDay);
+    }
+
+    // The lists FACTIONS hands out are their own iterator and share one cursor, so any
+    // nested walk of the same list resets the enclosing one. Reading a faction's worth
+    // reaches DIP.VASSAL().all(), which walks this very list, so the members are copied
+    // out before anything that might re-enter it is called.
+    private static void snapshotRankingCandidates() {
+        rankingCandidateCount = 0;
+
+        for (FactionNPC candidate : FACTIONS.NPCs()) {
+            rankingCandidates[rankingCandidateCount++] = candidate;
+        }
+    }
+
+    public static void logRivalryRanking(int currentDay) {
+        log.info("  RANKED day %d", currentDay);
+
+        for (int candidateI = 0; candidateI < rankingCandidateCount; candidateI++) {
+            FactionNPC candidate = rankingCandidates[candidateI];
+            int rank = rivalryRanks[candidate.index()];
+            if (rank != UNRANKED) {
+                double rivalry = RIVALRY_TOP_RANK_FINAL_MULT * Math.pow(RIVALRY_RANK_DECAY_BASE, rank);
+                log.info("    #%d %s raw %.4f -> rivalry %.3f, trust multiplier %.3f",
+                        rank, candidate.name, rankedRawRivalry[candidate.index()], rivalry, 1.0 - rivalry);
+            }
+        }
     }
 
     // FactionNPC.citizens(null) reads only the capitol region depite its name.
@@ -230,7 +419,8 @@ public final class ThalDiplomacy {
         log.info("  army: player %d x %.2f, faction %d -> military parity %.3f",
                 AD.power().get(FACTIONS.player()), RIVALRY_PLAYER_POWER_MULT,
                 AD.power().get(npcFaction), military);
-        log.info("  rivalry %.3f -> trust multiplier %.3f",
+        log.info("  raw %.3f, rank %d -> rivalry %.3f, trust multiplier %.3f",
+                currentRawRivalryScore(npcFaction), rivalryRank(npcFaction),
                 rivalryParity(npcFaction), 1.0 - rivalryParity(npcFaction));
         log.info("  military advantage %+.3f -> leverage %.3f",
                 militaryAdvantage(playerFaction, npcFaction), extortionLeverage(playerFaction, npcFaction));
