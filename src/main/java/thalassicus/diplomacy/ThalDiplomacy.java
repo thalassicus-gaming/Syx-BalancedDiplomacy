@@ -81,7 +81,7 @@ public final class ThalDiplomacy {
         return Math.pow(economic, RIVALRY_ECONOMIC_PARITY_EXPONENT) * Math.pow(military, RIVALRY_MILITARY_PARITY_EXPONENT);
     }
 
-    // FactionNPC.citizens(null) reads only the capitol region despite its name.
+    // FactionNPC.citizens(null) reads only the capitol region depite its name.
     public static int realmPopulation(Faction sourceFaction) {
         return RD.RACES().population.faction().get(sourceFaction);
     }
